@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="WorkDay"/>
+<meta name="theme-color" content="#0F1117"/>
+<title>WorkDay</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body,#root{height:100%;width:100%;overflow:hidden;}
+body{background:#0F1117;font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;}
+input,select,textarea,button{font-family:inherit;}
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:#2A3045;border-radius:99px;}
+input[type=date]::-webkit-calendar-picker-indicator{filter:invert(1);opacity:0.4;}
+select option{background:#181C27;color:#E8EAF0;}
+.drag-over{outline:2px dashed #6C8EF5;outline-offset:2px;border-radius:10px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+const C = {
+  bg:"#0F1117",surface:"#181C27",surfaceHi:"#1F2435",
+  border:"#2A3045",borderHi:"#3D4A6B",
+  text:"#E8EAF0",textMuted:"#7B85A0",textDim:"#4A5368",
+  accent:"#6C8EF5",accentDim:"#1E2748",
+  done:"#3D9970",doneDim:"#162B22",
+  danger:"#E06C75",archive:"#8B7355",archiveDim:"#2A2010",
+};
+
+const PC = [
+  {bg:"#6C8EF5",dim:"#1E2748",label:"#A8BEFF"},
+  {bg:"#E06C75",dim:"#321B1E",label:"#F5A3A9"},
+  {bg:"#E5C07B",dim:"#2E2410",label:"#F0D9A8"},
+  {bg:"#56B6C2",dim:"#102326",label:"#8DDAE4"},
+  {bg:"#C678DD",dim:"#26102E",label:"#DDA8EE"},
+  {bg:"#98C379",dim:"#182210",label:"#BDE09C"},
+];
+const CNAMES=["Blue","Red","Yellow","Teal","Purple","Green"];
+const PRI={high:{dot:"#E06C75"},medium:{dot:"#E5C07B"},low:{dot:"#56B6C2"}};
+
+const DEFAULT_PROJECTS=[
+  {id:"p1",name:"Product",colorIdx:0,archived:false},
+  {id:"p2",name:"Marketing",colorIdx:1,archived:false},
+  {id:"p3",name:"Engineering",colorIdx:3,archived:false},
+  {id:"p4",name:"Admin",colorIdx:2,archived:false},
+];
+const today=new Date();
+function isoDate(d){return d.toISOString().slice(0,10);}
+function uid(){return "id"+Date.now()+Math.random().toString(36).slice(2,6);}
+
+const DEFAULT_TASKS=[
+  {id:1,title:"Review Q3 roadmap doc",projectId:"p1",priority:"high",done:false,date:isoDate(today),time:"09:00",archived:false},
+  {id:2,title:"Write launch copy",projectId:"p2",priority:"medium",done:false,date:isoDate(today),time:"10:30",archived:false},
+  {id:3,title:"Standup call",projectId:"p3",priority:"medium",done:true,date:isoDate(today),time:"09:30",archived:false},
+  {id:4,title:"Fix login bug",projectId:"p3",priority:"high",done:false,date:isoDate(today),time:"14:00",archived:false},
+  {id:5,title:"Invoice follow-up",projectId:"p4",priority:"low",done:false,date:isoDate(today),time:"16:00",archived:false},
+  {id:6,title:"Competitor analysis",projectId:"p2",priority:"medium",done:false,date:isoDate(new Date(today.getTime()+86400000)),time:"11:00",archived:false},
+  {id:7,title:"Deploy staging build",projectId:"p3",priority:"high",done:false,date:isoDate(new Date(today.getTime()+86400000)),time:"15:00",archived:false},
+  {id:8,title:"User interview prep",projectId:"p1",priority:"medium",done:false,date:isoDate(new Date(today.getTime()+2*86400000)),time:"10:00",archived:false},
+];
+
+function load(k,fb){try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb;}catch{return fb;}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+
+// ── MODALS ─────────────────────────────────────────────────────
+function Modal({children,zIndex=300}){
+  return(
+    <div style={{position:"fixed",inset:0,zIndex,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.78)",backdropFilter:"blur(5px)"}}>
+      {children}
+    </div>
+  );
+}
+
+function ConfirmDialog({message,confirmLabel="Delete",confirmColor=C.danger,onConfirm,onCancel}){
+  return(
+    <Modal>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:24,maxWidth:320,width:"90%",textAlign:"center"}}>
+        <div style={{fontSize:15,color:C.text,marginBottom:20,lineHeight:1.6,whiteSpace:"pre-line"}}>{message}</div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onCancel} style={{flex:1,background:"none",border:`1px solid ${C.border}`,color:C.textMuted,borderRadius:8,padding:"10px",fontSize:14,cursor:"pointer"}}>Cancel</button>
+          <button onClick={onConfirm} style={{flex:1,background:confirmColor,border:"none",color:"#fff",borderRadius:8,padding:"10px",fontSize:14,fontWeight:700,cursor:"pointer"}}>{confirmLabel}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ProjectModal({existing,onSave,onCancel}){
+  const [name,setName]=useState(existing?.name||"");
+  const [colorIdx,setColorIdx]=useState(existing?.colorIdx??0);
+  const inp=useRef();
+  useEffect(()=>{setTimeout(()=>inp.current?.focus(),100);},[]);
+  const submit=()=>{if(!name.trim())return;onSave({name:name.trim(),colorIdx});};
+  return(
+    <Modal>
+      <div style={{background:C.surface,border:`1px solid ${C.borderHi}`,borderRadius:14,padding:24,maxWidth:340,width:"90%"}}>
+        <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:16}}>{existing?"Edit Project":"New Project"}</div>
+        <input ref={inp} value={name} onChange={e=>setName(e.target.value)}
+          onKeyDown={e=>{if(e.key==="Enter")submit();if(e.key==="Escape")onCancel();}}
+          placeholder="Project name…"
+          style={{width:"100%",background:C.surfaceHi,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 12px",fontSize:14,color:C.text,outline:"none",marginBottom:16}}/>
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:11,color:C.textMuted,marginBottom:10,fontWeight:600,textTransform:"uppercase",letterSpacing:0.5}}>Colour</div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {PC.map((c,i)=>(
+              <button key={i} onClick={()=>setColorIdx(i)} title={CNAMES[i]}
+                style={{width:32,height:32,borderRadius:"50%",background:c.bg,border:`3px solid ${colorIdx===i?"#fff":"transparent"}`,cursor:"pointer",outline:"none"}}/>
+            ))}
+          </div>
+        </div>
+        <div style={{background:C.surfaceHi,borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{width:10,height:10,borderRadius:"50%",background:PC[colorIdx].bg,flexShrink:0}}/>
+          <span style={{fontSize:14,color:C.text,fontWeight:600}}>{name||"Project name"}</span>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onCancel} style={{flex:1,background:"none",border:`1px solid ${C.border}`,color:C.textMuted,borderRadius:8,padding:"10px",fontSize:14,cursor:"pointer"}}>Cancel</button>
+          <button onClick={submit} style={{flex:1,background:C.accent,border:"none",color:"#fff",borderRadius:8,padding:"10px",fontSize:14,fontWeight:700,cursor:"pointer"}}>{existing?"Save":"Create"}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function TaskDetailPanel({task,projects,onSave,onClose,onDelete,onArchive,onToggle}){
+  const proj=projects.find(p=>p.id===task.projectId);
+  const pc=PC[proj?.colorIdx??0];
+  const [title,setTitle]=useState(task.title);
+  const [projectId,setProjectId]=useState(task.projectId);
+  const [priority,setPriority]=useState(task.priority);
+  const [status,setStatus]=useState(task.status||"not-started");
+  const [date,setDate]=useState(task.date||"");
+  const [time,setTime]=useState(task.time||"");
+  const [dueDate,setDueDate]=useState(task.dueDate||"");
+  const [description,setDescription]=useState(task.description||"");
+  const [deliverables,setDeliverables]=useState(task.deliverables||[]);
+  const [notes,setNotes]=useState(task.notes||"");
+  const [assignee,setAssignee]=useState(task.assignee||"");
+  const [estimatedHours,setEstimatedHours]=useState(task.estimatedHours||"");
+  const [tags,setTags]=useState(task.tags||[]);
+  const [newTag,setNewTag]=useState("");
+  const [newDeliv,setNewDeliv]=useState("");
+  const [showDeleteConfirm,setShowDeleteConfirm]=useState(false);
+
+  const flush=(extra={})=>onSave({...task,title,projectId,priority,status,date,time,dueDate,description,deliverables,notes,assignee,estimatedHours,tags,...extra});
+  const addDeliverable=()=>{
+    if(!newDeliv.trim())return;
+    const u=[...deliverables,{id:uid(),text:newDeliv.trim(),done:false}];
+    setDeliverables(u);setNewDeliv("");
+    onSave({...task,title,projectId,priority,status,date,time,dueDate,description,deliverables:u,notes,assignee,estimatedHours,tags});
+  };
+  const toggleDeliv=id=>{const u=deliverables.map(d=>d.id===id?{...d,done:!d.done}:d);setDeliverables(u);onSave({...task,title,projectId,priority,status,date,time,dueDate,description,deliverables:u,notes,assignee,estimatedHours,tags});};
+  const deleteDeliv=id=>{const u=deliverables.filter(d=>d.id!==id);setDeliverables(u);onSave({...task,title,projectId,priority,status,date,time,dueDate,description,deliverables:u,notes,assignee,estimatedHours,tags});};
+  const addTag=()=>{if(!newTag.trim()||tags.includes(newTag.trim()))return;const u=[...tags,newTag.trim()];setTags(u);setNewTag("");onSave({...task,title,projectId,priority,status,date,time,dueDate,description,deliverables,notes,assignee,estimatedHours,tags:u});};
+  const removeTag=t=>{const u=tags.filter(x=>x!==t);setTags(u);onSave({...task,title,projectId,priority,status,date,time,dueDate,description,deliverables,notes,assignee,estimatedHours,tags:u});};
+
+  const doneCount=deliverables.filter(d=>d.done).length;
+  const delivPct=deliverables.length?Math.round((doneCount/deliverables.length)*100):0;
+  const STATUS_OPTS=[
+    {val:"not-started",label:"Not Started",color:C.textDim},
+    {val:"in-progress",label:"In Progress",color:C.accent},
+    {val:"blocked",label:"Blocked",color:"#E06C75"},
+    {val:"review",label:"In Review",color:"#E5C07B"},
+    {val:"done",label:"Done",color:C.done},
+  ];
+  const inp={background:C.surfaceHi,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 10px",fontSize:13,color:C.text,width:"100%",outline:"none"};
+  const lbl={fontSize:11,color:C.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6,display:"block"};
+  const field={marginBottom:20};
+
+  return(
+    <>
+      {showDeleteConfirm&&(
+        <ConfirmDialog message={`Delete "${task.title}"?`}
+          onConfirm={()=>{onDelete(task.id);onClose();}}
+          onCancel={()=>setShowDeleteConfirm(false)}/>
+      )}
+      <div onClick={()=>{flush();onClose();}} style={{position:"fixed",inset:0,zIndex:199,background:"rgba(0,0,0,0.5)"}}/>
+      <div style={{position:"fixed",top:0,right:0,bottom:0,zIndex:200,width:"min(560px,100vw)",background:C.bg,borderLeft:`1px solid ${C.border}`,display:"flex",flexDirection:"column",overflowY:"auto",boxShadow:"-8px 0 40px rgba(0,0,0,0.5)"}}>
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",gap:8,padding:"13px 18px",borderBottom:`1px solid ${C.border}`,position:"sticky",top:0,background:C.bg,zIndex:10,flexWrap:"wrap"}}>
+          <div style={{width:10,height:10,borderRadius:"50%",background:pc.bg,flexShrink:0}}/>
+          <span style={{fontSize:12,color:C.textMuted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{proj?.name||"—"}</span>
+          <button onClick={()=>{onToggle(task.id);flush({done:!task.done});}} style={{background:task.done?C.done:C.surfaceHi,border:`1px solid ${task.done?C.done:C.border}`,color:task.done?"#fff":C.textMuted,borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:600,cursor:"pointer"}}>{task.done?"✓ Done":"Mark done"}</button>
+          <button onClick={()=>onArchive(task.id,!task.archived)} style={{background:"none",border:`1px solid ${C.border}`,color:C.archive,borderRadius:7,padding:"5px 10px",fontSize:12,cursor:"pointer"}} title="Archive">📦</button>
+          <button onClick={()=>setShowDeleteConfirm(true)} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:20,lineHeight:1}}>×</button>
+          <button onClick={()=>{flush();onClose();}} style={{background:"none",border:`1px solid ${C.border}`,color:C.textMuted,borderRadius:7,padding:"5px 12px",fontSize:12,cursor:"pointer"}}>✕ Close</button>
+        </div>
+        {/* Body */}
+        <div style={{padding:"24px 22px 48px",flex:1}}>
+          {/* Title */}
+          <textarea value={title} onChange={e=>setTitle(e.target.value)} onBlur={()=>flush()}
+            style={{width:"100%",background:"transparent",border:"none",outline:"none",fontSize:22,fontWeight:800,color:C.text,resize:"none",lineHeight:1.3,marginBottom:22,fontFamily:"inherit",minHeight:36}}
+            rows={1} onInput={e=>{e.target.style.height="auto";e.target.style.height=e.target.scrollHeight+"px";}}/>
+          {/* Meta grid */}
+          <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:16,marginBottom:24,display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><span style={lbl}>Status</span>
+              <select value={status} onChange={e=>{setStatus(e.target.value);flush({status:e.target.value});}} style={{...inp,color:STATUS_OPTS.find(s=>s.val===status)?.color||C.text}}>
+                {STATUS_OPTS.map(s=><option key={s.val} value={s.val}>{s.label}</option>)}
+              </select></div>
+            <div><span style={lbl}>Priority</span>
+              <select value={priority} onChange={e=>{setPriority(e.target.value);flush({priority:e.target.value});}} style={inp}>
+                <option value="high">🔴 High</option><option value="medium">🟡 Medium</option><option value="low">🔵 Low</option>
+              </select></div>
+            <div><span style={lbl}>Project</span>
+              <select value={projectId} onChange={e=>{setProjectId(e.target.value);flush({projectId:e.target.value});}} style={inp}>
+                {projects.filter(p=>!p.archived).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+              </select></div>
+            <div><span style={lbl}>Assignee</span>
+              <input value={assignee} onChange={e=>setAssignee(e.target.value)} onBlur={()=>flush()} placeholder="e.g. Alex" style={inp}/></div>
+            <div><span style={lbl}>Scheduled Date</span>
+              <input type="date" value={date} onChange={e=>{setDate(e.target.value);flush({date:e.target.value});}} style={inp}/></div>
+            <div><span style={lbl}>Time</span>
+              <input value={time} onChange={e=>setTime(e.target.value)} onBlur={()=>flush()} placeholder="HH:MM" style={inp}/></div>
+            <div><span style={lbl}>Due Date</span>
+              <input type="date" value={dueDate} onChange={e=>{setDueDate(e.target.value);flush({dueDate:e.target.value});}} style={inp}/></div>
+            <div><span style={lbl}>Est. Hours</span>
+              <input type="number" value={estimatedHours} onChange={e=>setEstimatedHours(e.target.value)} onBlur={()=>flush()} placeholder="0" style={inp} min="0" step="0.5"/></div>
+          </div>
+          {/* Tags */}
+          <div style={field}>
+            <span style={lbl}>Tags</span>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+              {tags.map(t=>(
+                <span key={t} style={{background:C.surfaceHi,color:C.textMuted,borderRadius:99,padding:"3px 10px",fontSize:12,display:"inline-flex",alignItems:"center",gap:5}}>
+                  {t}
+                  <button onClick={()=>removeTag(t)} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:14,lineHeight:1,padding:0}}>×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <input value={newTag} onChange={e=>setNewTag(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addTag();}} placeholder="Add tag…" style={{...inp,flex:1}}/>
+              <button onClick={addTag} style={{background:C.surfaceHi,border:`1px solid ${C.border}`,color:C.accent,borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:600}}>+</button>
+            </div>
+          </div>
+          {/* Description */}
+          <div style={field}>
+            <span style={lbl}>Description</span>
+            <textarea value={description} onChange={e=>setDescription(e.target.value)} onBlur={()=>flush()}
+              placeholder="What is this task about? Add context, background, goals…"
+              style={{...inp,minHeight:90,resize:"vertical",lineHeight:1.6}}/>
+          </div>
+          {/* Deliverables */}
+          <div style={field}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <span style={lbl}>Deliverables</span>
+              {deliverables.length>0&&<span style={{fontSize:11,color:delivPct===100?C.done:C.textMuted}}>{doneCount}/{deliverables.length} done</span>}
+            </div>
+            {deliverables.length>0&&(
+              <div style={{background:C.border,borderRadius:99,height:4,marginBottom:12,overflow:"hidden"}}>
+                <div style={{width:`${delivPct}%`,height:"100%",background:delivPct===100?C.done:C.accent,borderRadius:99,transition:"width 0.3s"}}/>
+              </div>
+            )}
+            {deliverables.map(d=>(
+              <div key={d.id} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 10px",background:C.surfaceHi,borderRadius:8,marginBottom:6,borderLeft:`3px solid ${d.done?C.done:C.borderHi}`}}>
+                <button onClick={()=>toggleDeliv(d.id)}
+                  style={{width:18,height:18,borderRadius:"50%",flexShrink:0,border:`2px solid ${d.done?C.done:C.borderHi}`,background:d.done?C.done:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",minWidth:18,marginTop:1}}>
+                  {d.done&&<span style={{color:"#fff",fontSize:10,lineHeight:1}}>✓</span>}
+                </button>
+                <span style={{flex:1,fontSize:13,color:d.done?C.textDim:C.text,textDecoration:d.done?"line-through":"none",lineHeight:1.5}}>{d.text}</span>
+                <button onClick={()=>deleteDeliv(d.id)} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:15,lineHeight:1}}>×</button>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:6,marginTop:8}}>
+              <input value={newDeliv} onChange={e=>setNewDeliv(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")addDeliverable();}} placeholder="Add deliverable… (Enter)" style={{...inp,flex:1}}/>
+              <button onClick={addDeliverable} style={{background:C.surfaceHi,border:`1px solid ${C.border}`,color:C.accent,borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:600}}>+</button>
+            </div>
+          </div>
+          {/* Notes */}
+          <div style={field}>
+            <span style={lbl}>Notes</span>
+            <textarea value={notes} onChange={e=>setNotes(e.target.value)} onBlur={()=>flush()}
+              placeholder="Meeting notes, decisions, blockers, links…"
+              style={{...inp,minHeight:120,resize:"vertical",lineHeight:1.6}}/>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── TASK COMPONENTS ────────────────────────────────────────────
+function PriorityDot({value}){
+  return <span style={{width:7,height:7,borderRadius:"50%",background:PRI[value].dot,display:"inline-block",flexShrink:0}}/>;
+}
+
+function TaskCard({task,project,onToggle,onEdit,onDelete,onArchive}){
+  const [menu,setMenu]=useState(false);
+  const pc=PC[project?.colorIdx??0];
+  const isArchived=task.archived;
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:8,borderLeft:`3px solid ${isArchived?C.archive:task.done?C.border:pc.bg}`,marginBottom:2,opacity:isArchived?0.6:1,position:"relative"}}>
+      <button onClick={()=>onToggle(task.id)}
+        style={{width:20,height:20,borderRadius:"50%",flexShrink:0,border:`2px solid ${task.done?C.done:pc.bg}`,background:task.done?C.done:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",minWidth:20}}>
+        {task.done&&<span style={{color:"#fff",fontSize:11,lineHeight:1}}>✓</span>}
+      </button>
+      <PriorityDot value={task.priority}/>
+      <span onClick={()=>!isArchived&&onEdit(task)}
+        style={{flex:1,fontSize:14,color:isArchived?C.textDim:task.done?C.textMuted:C.text,textDecoration:task.done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:isArchived?"default":"pointer",userSelect:"none"}}
+        title={isArchived?"":"Click to open task"}>
+        {task.title}
+        {!isArchived&&<span style={{fontSize:10,color:C.textDim,marginLeft:6,opacity:0.6}}>↗</span>}
+      </span>
+      {task.time&&<span style={{fontSize:11,color:C.textMuted,flexShrink:0}}>{task.time}</span>}
+      {isArchived&&<span style={{fontSize:10,color:C.archive,background:C.archiveDim,borderRadius:4,padding:"1px 6px",flexShrink:0}}>archived</span>}
+      {/* Context menu trigger */}
+      <div style={{position:"relative"}}>
+        <button onClick={()=>setMenu(m=>!m)}
+          style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:16,padding:"0 3px",lineHeight:1}}>⋯</button>
+        {menu&&(
+          <div style={{position:"absolute",right:0,top:"100%",zIndex:50,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,minWidth:140,boxShadow:"0 8px 24px rgba(0,0,0,0.5)"}}>
+            {!isArchived&&<button onClick={()=>{onEdit(task);setMenu(false);}} style={{display:"block",width:"100%",padding:"9px 14px",background:"none",border:"none",color:C.text,fontSize:13,cursor:"pointer",textAlign:"left"}}>✎ Edit</button>}
+            <button onClick={()=>{onArchive(task.id,!isArchived);setMenu(false);}} style={{display:"block",width:"100%",padding:"9px 14px",background:"none",border:"none",color:C.archive,fontSize:13,cursor:"pointer",textAlign:"left"}}>{isArchived?"↑ Unarchive":"📦 Archive"}</button>
+            <button onClick={()=>{onDelete(task.id);setMenu(false);}} style={{display:"block",width:"100%",padding:"9px 14px",background:"none",border:"none",color:C.danger,fontSize:13,cursor:"pointer",textAlign:"left"}}>× Delete</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function QuickAddTask({projectId,projects,onAdd,onCancel}){
+  const [title,setTitle]=useState("");
+  const [priority,setPriority]=useState("medium");
+  const [date,setDate]=useState(isoDate(today));
+  const [time,setTime]=useState("");
+  const inp=useRef();
+  useEffect(()=>{setTimeout(()=>inp.current?.focus(),80);},[]);
+  const submit=()=>{if(!title.trim())return;onAdd({title:title.trim(),projectId,priority,date,time});setTitle("");setTime("");};
+  const s={background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"7px 9px",fontSize:12,color:C.text,cursor:"pointer"};
+  return(
+    <div style={{background:C.surfaceHi,borderRadius:10,padding:12,margin:"6px 8px",border:`1px solid ${C.borderHi}`}}>
+      <input ref={inp} value={title} onChange={e=>setTitle(e.target.value)}
+        onKeyDown={e=>{if(e.key==="Enter")submit();if(e.key==="Escape")onCancel();}}
+        placeholder="Task name… (Enter to save)"
+        style={{width:"100%",background:C.bg,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 10px",fontSize:14,color:C.text,outline:"none",marginBottom:8}}/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+        <select value={priority} onChange={e=>setPriority(e.target.value)} style={s}>
+          <option value="high">🔴 High</option><option value="medium">🟡 Medium</option><option value="low">🔵 Low</option>
+        </select>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={s}/>
+        <input value={time} onChange={e=>setTime(e.target.value)} placeholder="HH:MM" style={{...s,width:80}}/>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={submit} style={{flex:1,background:C.accent,color:"#fff",border:"none",borderRadius:7,padding:"8px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add Task</button>
+        <button onClick={onCancel} style={{background:"none",color:C.textMuted,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 12px",fontSize:13,cursor:"pointer"}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+function AddTaskForm({projects,defaultProjectId,defaultDate,onAdd,onCancel}){
+  const [title,setTitle]=useState("");
+  const [projectId,setProjectId]=useState(defaultProjectId||projects.filter(p=>!p.archived)[0]?.id);
+  const [priority,setPriority]=useState("medium");
+  const [time,setTime]=useState("");
+  const [date,setDate]=useState(defaultDate||isoDate(today));
+  const inp=useRef();
+  useEffect(()=>{setTimeout(()=>inp.current?.focus(),100);},[]);
+  const submit=()=>{if(!title.trim())return;onAdd({title:title.trim(),projectId,priority,time,date});setTitle("");setTime("");};
+  const sel={background:C.surface,border:`1px solid ${C.border}`,borderRadius:7,padding:"8px 10px",fontSize:13,color:C.text,cursor:"pointer",width:"100%"};
+  return(
+    <div style={{background:C.surfaceHi,border:`1px solid ${C.borderHi}`,borderRadius:12,padding:16,marginBottom:12}}>
+      <input ref={inp} value={title} onChange={e=>setTitle(e.target.value)}
+        onKeyDown={e=>{if(e.key==="Enter")submit();if(e.key==="Escape")onCancel();}}
+        placeholder="Task name…" style={{...sel,marginBottom:10,outline:"none"}}/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        <select value={projectId} onChange={e=>setProjectId(e.target.value)} style={sel}>
+          {projects.filter(p=>!p.archived).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={priority} onChange={e=>setPriority(e.target.value)} style={sel}>
+          <option value="high">🔴 High</option><option value="medium">🟡 Medium</option><option value="low">🔵 Low</option>
+        </select>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={sel}/>
+        <input value={time} onChange={e=>setTime(e.target.value)} placeholder="Time (HH:MM)" style={sel}/>
+      </div>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={submit} style={{flex:1,background:C.accent,color:"#fff",border:"none",borderRadius:8,padding:"10px",fontSize:14,fontWeight:700,cursor:"pointer"}}>Add Task</button>
+        <button onClick={onCancel} style={{background:"none",color:C.textMuted,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 16px",fontSize:14,cursor:"pointer"}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ── TODAY VIEW ─────────────────────────────────────────────────
+function TodayView({tasks,projects,onToggle,onEdit,onDelete,onArchiveTask,onAdd}){
+  const [adding,setAdding]=useState(false);
+  const todayStr=isoDate(today);
+  const todayTasks=tasks.filter(t=>t.date===todayStr&&!t.archived).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+  const done=todayTasks.filter(t=>t.done).length;
+  const pct=todayTasks.length?Math.round((done/todayTasks.length)*100):0;
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:24}}>
+        <div>
+          <div style={{fontSize:12,color:C.accent,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>{today.toLocaleDateString("en-US",{weekday:"long"})}</div>
+          <div style={{fontSize:26,fontWeight:800,color:C.text,lineHeight:1}}>{today.toLocaleDateString("en-US",{month:"long",day:"numeric"})}</div>
+        </div>
+        <button onClick={()=>setAdding(true)} style={{background:C.accent,color:"#fff",border:"none",borderRadius:10,padding:"10px 18px",fontSize:14,fontWeight:700,cursor:"pointer"}}>+ Task</button>
+      </div>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:16}}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+            <span style={{fontSize:12,color:C.textMuted}}>Today's progress</span>
+            <span style={{fontSize:12,fontWeight:700,color:pct===100?C.done:C.text}}>{pct}%</span>
+          </div>
+          <div style={{background:C.border,borderRadius:99,height:6,overflow:"hidden"}}>
+            <div style={{width:`${pct}%`,height:"100%",background:pct===100?C.done:C.accent,borderRadius:99,transition:"width 0.4s"}}/>
+          </div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:22,fontWeight:800,color:C.text}}>{done}<span style={{fontSize:13,color:C.textMuted,fontWeight:400}}>/{todayTasks.length}</span></div>
+          <div style={{fontSize:11,color:C.textMuted}}>tasks done</div>
+        </div>
+      </div>
+      {adding&&<AddTaskForm projects={projects} defaultDate={todayStr} onAdd={t=>{onAdd(t);setAdding(false);}} onCancel={()=>setAdding(false)}/>}
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+        {todayTasks.length===0
+          ?<div style={{padding:32,textAlign:"center",color:C.textDim,fontSize:14}}>Nothing scheduled today.<br/>Tap "+ Task" to add one.</div>
+          :todayTasks.map(t=>{const proj=projects.find(p=>p.id===t.projectId);return <TaskCard key={t.id} task={t} project={proj} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} onArchive={onArchiveTask}/>;})
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── PROJECTS VIEW with drag-and-drop ──────────────────────────
+function ProjectsView({tasks,projects,onToggle,onEdit,onDelete,onArchiveTask,onAdd,onAddProject,onEditProject,onDeleteProject,onArchiveProject,onReorderProjects}){
+  const [collapsed,setCollapsed]=useState({});
+  const [addingTo,setAddingTo]=useState(null);
+  const [confirmDelete,setConfirmDelete]=useState(null);
+  const [editingProject,setEditingProject]=useState(null);
+  const [showArchived,setShowArchived]=useState(false);
+  const dragItem=useRef(null);
+  const dragOver=useRef(null);
+
+  const active=projects.filter(p=>!p.archived);
+  const archived=projects.filter(p=>p.archived);
+
+  const handleDragStart=(e,idx)=>{
+    dragItem.current=idx;
+    e.dataTransfer.effectAllowed="move";
+    e.currentTarget.style.opacity="0.4";
+  };
+  const handleDragEnd=(e)=>{
+    e.currentTarget.style.opacity="1";
+    document.querySelectorAll(".proj-row").forEach(el=>el.classList.remove("drag-over"));
+    if(dragItem.current!==null&&dragOver.current!==null&&dragItem.current!==dragOver.current){
+      const copy=[...active];
+      const [moved]=copy.splice(dragItem.current,1);
+      copy.splice(dragOver.current,0,moved);
+      onReorderProjects([...copy,...archived]);
+    }
+    dragItem.current=null;dragOver.current=null;
+  };
+  const handleDragOver=(e,idx)=>{
+    e.preventDefault();
+    dragOver.current=idx;
+    document.querySelectorAll(".proj-row").forEach((el,i)=>{
+      if(i===idx)el.classList.add("drag-over"); else el.classList.remove("drag-over");
+    });
+  };
+
+  return(
+    <div>
+      {editingProject&&(
+        <ProjectModal existing={editingProject==="new"?null:editingProject}
+          onSave={data=>{editingProject==="new"?onAddProject(data):onEditProject({...editingProject,...data});setEditingProject(null);}}
+          onCancel={()=>setEditingProject(null)}/>
+      )}
+      {confirmDelete&&(
+        <ConfirmDialog
+          message={`Delete "${confirmDelete.proj.name}"?\n${confirmDelete.taskCount>0?`This will also remove ${confirmDelete.taskCount} task${confirmDelete.taskCount!==1?"s":""}.`:""}`}
+          onConfirm={()=>{onDeleteProject(confirmDelete.proj.id);setConfirmDelete(null);}}
+          onCancel={()=>setConfirmDelete(null)}/>
+      )}
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24}}>
+        <div>
+          <div style={{fontSize:24,fontWeight:800,color:C.text}}>Projects</div>
+          <div style={{fontSize:13,color:C.textMuted,marginTop:3}}>{active.length} active{archived.length>0?`, ${archived.length} archived`:""}</div>
+        </div>
+        <button onClick={()=>setEditingProject("new")}
+          style={{background:C.surfaceHi,color:C.accent,border:`1px solid ${C.borderHi}`,borderRadius:10,padding:"10px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Project</button>
+      </div>
+
+      <div style={{fontSize:11,color:C.textDim,marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
+        <span>⠿</span> Drag to reorder
+      </div>
+
+      {active.map((proj,idx)=>{
+        const ptasks=tasks.filter(t=>t.projectId===proj.id&&!t.archived).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+        const archivedTasks=tasks.filter(t=>t.projectId===proj.id&&t.archived);
+        const done=ptasks.filter(t=>t.done).length;
+        const pc=PC[proj.colorIdx];
+        const isCollapsed=collapsed[proj.id];
+        const isAddingHere=addingTo===proj.id;
+        return(
+          <div key={proj.id} className="proj-row"
+            draggable
+            onDragStart={e=>handleDragStart(e,idx)}
+            onDragEnd={handleDragEnd}
+            onDragOver={e=>handleDragOver(e,idx)}
+            style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,marginBottom:10,overflow:"hidden",transition:"opacity 0.15s"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"13px 14px",borderBottom:isCollapsed&&!isAddingHere?"none":`1px solid ${C.border}`}}>
+              {/* drag handle */}
+              <span style={{color:C.textDim,fontSize:14,cursor:"grab",flexShrink:0,userSelect:"none"}}>⠿</span>
+              <span onClick={()=>setCollapsed(c=>({...c,[proj.id]:!c[proj.id]}))}
+                style={{width:10,height:10,borderRadius:"50%",background:pc.bg,flexShrink:0,cursor:"pointer"}}/>
+              <span onClick={()=>setCollapsed(c=>({...c,[proj.id]:!c[proj.id]}))}
+                style={{fontSize:15,fontWeight:700,color:C.text,flex:1,cursor:"pointer",userSelect:"none"}}>{proj.name}</span>
+              <span style={{fontSize:12,color:C.textMuted}}>{done}/{ptasks.length}</span>
+              <div style={{width:40,height:4,background:C.border,borderRadius:99,overflow:"hidden"}}>
+                <div style={{width:ptasks.length?`${(done/ptasks.length)*100}%`:"0%",height:"100%",background:pc.bg,borderRadius:99,transition:"width 0.3s"}}/>
+              </div>
+              <button onClick={()=>setAddingTo(isAddingHere?null:proj.id)}
+                style={{background:isAddingHere?C.accentDim:"none",color:isAddingHere?C.accent:C.textMuted,border:`1px solid ${isAddingHere?C.accent:C.border}`,borderRadius:6,padding:"3px 9px",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>+ Task</button>
+              <button onClick={()=>setEditingProject(proj)} style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:13,padding:"2px 3px"}}>✎</button>
+              <button onClick={()=>onArchiveProject(proj.id,true)} title="Archive project" style={{background:"none",border:"none",color:C.archive,cursor:"pointer",fontSize:13,padding:"2px 3px"}}>📦</button>
+              <button onClick={()=>setConfirmDelete({proj,taskCount:ptasks.length+archivedTasks.length})} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:16,padding:"2px 3px"}}>×</button>
+              <span onClick={()=>setCollapsed(c=>({...c,[proj.id]:!c[proj.id]}))} style={{color:C.textDim,fontSize:12,cursor:"pointer",userSelect:"none"}}>{isCollapsed?"▶":"▼"}</span>
+            </div>
+            {isAddingHere&&(
+              <QuickAddTask projectId={proj.id} projects={projects}
+                onAdd={t=>{onAdd(t);setAddingTo(null);if(isCollapsed)setCollapsed(c=>({...c,[proj.id]:false}));}}
+                onCancel={()=>setAddingTo(null)}/>
+            )}
+            {!isCollapsed&&(
+              <div style={{padding:"6px 4px 4px"}}>
+                {ptasks.length===0&&!isAddingHere&&(
+                  <div style={{padding:"10px 16px",fontSize:13,color:C.textDim,display:"flex",alignItems:"center",gap:8}}>
+                    No tasks yet.
+                    <button onClick={()=>setAddingTo(proj.id)} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontSize:13,padding:0,fontWeight:600}}>Add one →</button>
+                  </div>
+                )}
+                {ptasks.map(t=><TaskCard key={t.id} task={t} project={proj} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} onArchive={onArchiveTask}/>)}
+                {archivedTasks.length>0&&(
+                  <div style={{padding:"6px 12px",fontSize:11,color:C.textDim}}>{archivedTasks.length} archived task{archivedTasks.length!==1?"s":""} hidden</div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Archived projects */}
+      {archived.length>0&&(
+        <div style={{marginTop:20}}>
+          <button onClick={()=>setShowArchived(s=>!s)}
+            style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+            <span>{showArchived?"▼":"▶"}</span> Archived Projects ({archived.length})
+          </button>
+          {showArchived&&archived.map(proj=>{
+            const pc=PC[proj.colorIdx];
+            const ptasks=tasks.filter(t=>t.projectId===proj.id);
+            return(
+              <div key={proj.id} style={{background:C.archiveDim,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:8,padding:"12px 14px",display:"flex",alignItems:"center",gap:10,opacity:0.8}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:pc.bg,flexShrink:0}}/>
+                <span style={{fontSize:14,color:C.textMuted,flex:1}}>{proj.name}</span>
+                <span style={{fontSize:11,color:C.textDim}}>{ptasks.length} task{ptasks.length!==1?"s":""}</span>
+                <button onClick={()=>onArchiveProject(proj.id,false)} style={{background:"none",border:`1px solid ${C.border}`,color:C.textMuted,borderRadius:6,padding:"4px 10px",fontSize:12,cursor:"pointer"}}>Restore</button>
+                <button onClick={()=>setConfirmDelete({proj,taskCount:ptasks.length})} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:16}}>×</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CALENDAR VIEW with Day / Week / Month / Year ───────────────
+function CalendarView({tasks,projects,onToggle,onEdit,onDelete,onAdd}){
+  const [calView,setCalView]=useState("week"); // day | week | month | year
+  const [anchor,setAnchor]=useState(today);
+  const [adding,setAdding]=useState(null);
+  const todayStr=isoDate(today);
+
+  const navigate=(dir)=>{
+    const d=new Date(anchor);
+    if(calView==="day")d.setDate(d.getDate()+dir);
+    else if(calView==="week")d.setDate(d.getDate()+dir*7);
+    else if(calView==="month")d.setMonth(d.getMonth()+dir);
+    else if(calView==="year")d.setFullYear(d.getFullYear()+dir);
+    setAnchor(d);
+  };
+
+  // ── DAY VIEW ──
+  const DayView=()=>{
+    const ds=isoDate(anchor);
+    const dayTasks=tasks.filter(t=>t.date===ds&&!t.archived).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+    return(
+      <div>
+        <div style={{textAlign:"center",marginBottom:20}}>
+          <div style={{fontSize:22,fontWeight:800,color:anchor.toDateString()===today.toDateString()?C.accent:C.text}}>
+            {anchor.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}
+          </div>
+        </div>
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+          {dayTasks.length===0
+            ?<div style={{padding:32,textAlign:"center",color:C.textDim,fontSize:14}}>Nothing scheduled.<br/>
+              <button onClick={()=>setAdding(ds)} style={{color:C.accent,background:"none",border:"none",cursor:"pointer",fontSize:14,marginTop:8}}>+ Add task</button>
+            </div>
+            :dayTasks.map(t=>{const proj=projects.find(p=>p.id===t.projectId);return <TaskCard key={t.id} task={t} project={proj} onToggle={onToggle} onEdit={onEdit} onDelete={onDelete} onArchive={()=>{}}/>;})
+          }
+        </div>
+        <button onClick={()=>setAdding(ds)} style={{background:C.surfaceHi,color:C.accent,border:`1px dashed ${C.borderHi}`,borderRadius:8,padding:"10px",width:"100%",fontSize:13,cursor:"pointer",fontWeight:600}}>+ Add task for this day</button>
+        {adding&&<div style={{marginTop:12}}><AddTaskForm projects={projects} defaultDate={adding} onAdd={t=>{onAdd(t);setAdding(null);}} onCancel={()=>setAdding(null)}/></div>}
+      </div>
+    );
+  };
+
+  // ── WEEK VIEW ──
+  const WeekView=()=>{
+    const days=useMemo(()=>{
+      const d=new Date(anchor),dow=d.getDay();
+      const mon=new Date(d);mon.setDate(d.getDate()-((dow+6)%7));
+      return Array.from({length:7},(_,i)=>{const x=new Date(mon);x.setDate(mon.getDate()+i);return x;});
+    },[anchor]);
+    return(
+      <div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6}}>
+          {days.map(day=>{
+            const ds=isoDate(day);
+            const isToday=ds===todayStr;
+            const dayTasks=tasks.filter(t=>t.date===ds&&!t.archived).sort((a,b)=>(a.time||"").localeCompare(b.time||""));
+            return(
+              <div key={ds} style={{background:isToday?C.accentDim:C.surface,border:`1px solid ${isToday?C.accent:C.border}`,borderRadius:10,minHeight:120,padding:8,display:"flex",flexDirection:"column",gap:3,minWidth:0}}>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontSize:10,color:isToday?C.accent:C.textMuted,fontWeight:700,textTransform:"uppercase",letterSpacing:0.5}}>{day.toLocaleDateString("en-US",{weekday:"short"})}</span>
+                  <span style={{fontSize:15,fontWeight:800,color:isToday?"#fff":C.textMuted,background:isToday?C.accent:"transparent",width:26,height:26,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",marginTop:2}}>{day.getDate()}</span>
+                </div>
+                {dayTasks.map(t=>{const proj=projects.find(p=>p.id===t.projectId);const pc=PC[proj?.colorIdx??0];return(
+                  <div key={t.id} onClick={()=>onEdit(t)}
+                    style={{background:t.done?C.doneDim:pc.dim,borderLeft:`3px solid ${t.done?C.done:pc.bg}`,borderRadius:4,padding:"3px 5px",cursor:"pointer",opacity:t.done?0.6:1}}>
+                    <div style={{fontSize:10,color:t.done?C.textMuted:pc.label,fontWeight:600,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>
+                      {t.time&&<span style={{opacity:0.7}}>{t.time} </span>}{t.title}
+                    </div>
+                  </div>
+                );})}
+                <button onClick={()=>setAdding(ds)} style={{marginTop:"auto",background:"none",border:`1px dashed ${C.border}`,borderRadius:4,color:C.textDim,fontSize:11,padding:"3px 0",cursor:"pointer",width:"100%"}}>+</button>
+              </div>
+            );
+          })}
+        </div>
+        {adding&&(
+          <div style={{marginTop:16}}>
+            <div style={{fontSize:13,color:C.textMuted,marginBottom:8}}>Adding task for {new Date(adding+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+            <AddTaskForm projects={projects} defaultDate={adding} onAdd={t=>{onAdd(t);setAdding(null);}} onCancel={()=>setAdding(null)}/>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── MONTH VIEW ──
+  const MonthView=()=>{
+    const year=anchor.getFullYear(),month=anchor.getMonth();
+    const firstDay=new Date(year,month,1);
+    const startOffset=(firstDay.getDay()+6)%7; // Mon start
+    const daysInMonth=new Date(year,month+1,0).getDate();
+    const cells=Array.from({length:startOffset+daysInMonth},(_,i)=>i<startOffset?null:i-startOffset+1);
+    return(
+      <div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
+          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>(
+            <div key={d} style={{textAlign:"center",fontSize:11,color:C.textDim,fontWeight:700,padding:"4px 0",textTransform:"uppercase",letterSpacing:0.4}}>{d}</div>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+          {cells.map((day,i)=>{
+            if(!day)return<div key={i}/>;
+            const ds=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+            const isToday=ds===todayStr;
+            const dayTasks=tasks.filter(t=>t.date===ds&&!t.archived);
+            return(
+              <div key={ds} onClick={()=>{setAnchor(new Date(ds+"T12:00:00"));setCalView("day");}}
+                style={{background:isToday?C.accentDim:C.surfaceHi,border:`1px solid ${isToday?C.accent:C.border}`,borderRadius:8,minHeight:72,padding:6,cursor:"pointer",transition:"background 0.1s"}}>
+                <div style={{fontSize:13,fontWeight:isToday?800:500,color:isToday?C.accent:C.textMuted,marginBottom:4}}>{day}</div>
+                {dayTasks.slice(0,3).map(t=>{const proj=projects.find(p=>p.id===t.projectId);const pc=PC[proj?.colorIdx??0];return(
+                  <div key={t.id} style={{fontSize:9,color:pc.label,background:pc.dim,borderRadius:3,padding:"2px 4px",marginBottom:2,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{t.title}</div>
+                );})}
+                {dayTasks.length>3&&<div style={{fontSize:9,color:C.textDim}}>+{dayTasks.length-3} more</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  // ── YEAR VIEW ──
+  const YearView=()=>{
+    const year=anchor.getFullYear();
+    const months=Array.from({length:12},(_,i)=>i);
+    return(
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+        {months.map(m=>{
+          const mName=new Date(year,m,1).toLocaleDateString("en-US",{month:"short"});
+          const taskCount=tasks.filter(t=>!t.archived&&t.date&&t.date.startsWith(`${year}-${String(m+1).padStart(2,"0")}`)).length;
+          const isCurrentMonth=m===today.getMonth()&&year===today.getFullYear();
+          return(
+            <div key={m} onClick={()=>{setAnchor(new Date(year,m,1));setCalView("month");}}
+              style={{background:isCurrentMonth?C.accentDim:C.surface,border:`1px solid ${isCurrentMonth?C.accent:C.border}`,borderRadius:10,padding:"14px 12px",cursor:"pointer",textAlign:"center",transition:"background 0.1s"}}>
+              <div style={{fontSize:15,fontWeight:700,color:isCurrentMonth?C.accent:C.text,marginBottom:6}}>{mName}</div>
+              {taskCount>0
+                ?<div style={{fontSize:12,color:C.textMuted}}>{taskCount} task{taskCount!==1?"s":""}</div>
+                :<div style={{fontSize:12,color:C.textDim}}>—</div>
+              }
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const titleMap={
+    day:anchor.toLocaleDateString("en-US",{weekday:"short",month:"long",day:"numeric",year:"numeric"}),
+    week:(()=>{const d=new Date(anchor),dow=d.getDay();const mon=new Date(d);mon.setDate(d.getDate()-((dow+6)%7));const sun=new Date(mon);sun.setDate(mon.getDate()+6);return`${mon.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${sun.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;})(),
+    month:anchor.toLocaleDateString("en-US",{month:"long",year:"numeric"}),
+    year:anchor.getFullYear().toString(),
+  };
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:800,color:C.text}}>Calendar</div>
+          <div style={{fontSize:12,color:C.textMuted,marginTop:2}}>{titleMap[calView]}</div>
+        </div>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {/* View toggles */}
+          <div style={{display:"flex",background:C.surfaceHi,borderRadius:8,padding:3,gap:2}}>
+            {["day","week","month","year"].map(v=>(
+              <button key={v} onClick={()=>setCalView(v)}
+                style={{background:calView===v?C.accent:"transparent",color:calView===v?"#fff":C.textMuted,border:"none",borderRadius:6,padding:"5px 10px",fontSize:12,fontWeight:calView===v?700:400,cursor:"pointer",textTransform:"capitalize"}}>
+                {v}
+              </button>
+            ))}
+          </div>
+          <button onClick={()=>navigate(-1)} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:14}}>←</button>
+          <button onClick={()=>setAnchor(new Date())} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.accent,borderRadius:8,padding:"6px 10px",cursor:"pointer",fontSize:12,fontWeight:600}}>Today</button>
+          <button onClick={()=>navigate(1)} style={{background:C.surface,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:14}}>→</button>
+        </div>
+      </div>
+      {calView==="day"&&<DayView/>}
+      {calView==="week"&&<WeekView/>}
+      {calView==="month"&&<MonthView/>}
+      {calView==="year"&&<YearView/>}
+    </div>
+  );
+}
+
+// ── APP ────────────────────────────────────────────────────────
+function App(){
+  const [tasks,setTasks]=useState(()=>load("wd_tasks",DEFAULT_TASKS));
+  const [projects,setProjects]=useState(()=>load("wd_projects",DEFAULT_PROJECTS));
+  const [view,setView]=useState(()=>load("wd_view","today"));
+  const [nextId,setNextId]=useState(()=>load("wd_nextid",200));
+  const [sidebarOpen,setSidebarOpen]=useState(false);
+  const [openTask,setOpenTask]=useState(null);
+
+  useEffect(()=>save("wd_tasks",tasks),[tasks]);
+  useEffect(()=>save("wd_projects",projects),[projects]);
+  useEffect(()=>save("wd_view",view),[view]);
+  useEffect(()=>save("wd_nextid",nextId),[nextId]);
+
+  const toggle=id=>setTasks(ts=>ts.map(t=>t.id===id?{...t,done:!t.done}:t));
+  const del=id=>setTasks(ts=>ts.filter(t=>t.id!==id));
+  const add=task=>{setTasks(ts=>[...ts,{...task,id:nextId,done:false,archived:false}]);setNextId(n=>n+1);};
+  const saveTask=updated=>setTasks(ts=>ts.map(t=>t.id===updated.id?updated:t));
+  const archiveTask=(id,val)=>setTasks(ts=>ts.map(t=>t.id===id?{...t,archived:val}:t));
+
+  const addProject=({name,colorIdx})=>setProjects(ps=>[...ps,{id:uid(),name,colorIdx,archived:false}]);
+  const editProject=updated=>setProjects(ps=>ps.map(p=>p.id===updated.id?updated:p));
+  const deleteProject=id=>{setProjects(ps=>ps.filter(p=>p.id!==id));setTasks(ts=>ts.filter(t=>t.projectId!==id));};
+  const archiveProject=(id,val)=>setProjects(ps=>ps.map(p=>p.id===id?{...p,archived:val}:p));
+  const reorderProjects=newOrder=>setProjects(newOrder);
+
+  const NAV=[{id:"today",label:"Today",icon:"◈"},{id:"projects",label:"Projects",icon:"⬡"},{id:"calendar",label:"Calendar",icon:"▦"}];
+  const setViewAndClose=v=>{setView(v);setSidebarOpen(false);};
+  const openTasks=tasks.filter(t=>!t.done&&!t.archived).length;
+  const doneTasks=tasks.filter(t=>t.done&&!t.archived).length;
+
+  const SidebarContent=()=>(
+    <>
+      <div style={{padding:"4px 8px 20px",borderBottom:`1px solid ${C.border}`,marginBottom:16}}>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,letterSpacing:-0.3}}>◈ WorkDay</div>
+        <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>{today.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+      </div>
+      {NAV.map(n=>(
+        <button key={n.id} onClick={()=>setViewAndClose(n.id)}
+          style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px",marginBottom:3,background:view===n.id?C.accentDim:"transparent",border:"none",borderRadius:8,cursor:"pointer",color:view===n.id?C.accent:C.textMuted,fontSize:14,fontWeight:view===n.id?700:400,textAlign:"left"}}>
+          <span style={{fontSize:16}}>{n.icon}</span>{n.label}
+        </button>
+      ))}
+      <div style={{marginTop:24,paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.textDim,textTransform:"uppercase",letterSpacing:1,marginBottom:10,padding:"0 10px"}}>Projects</div>
+        {projects.filter(p=>!p.archived).map(p=>{
+          const pc=PC[p.colorIdx];
+          const count=tasks.filter(t=>t.projectId===p.id&&!t.done&&!t.archived).length;
+          return(
+            <div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",borderRadius:6}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:pc.bg,flexShrink:0}}/>
+              <span style={{fontSize:13,color:C.textMuted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
+              {count>0&&<span style={{fontSize:10,color:C.textDim,background:C.surfaceHi,borderRadius:99,padding:"1px 6px",flexShrink:0}}>{count}</span>}
+            </div>
+          );
+        })}
+        <button onClick={()=>setViewAndClose("projects")}
+          style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"6px 10px",background:"none",border:"none",cursor:"pointer",color:C.textDim,fontSize:12,marginTop:4}}>
+          <span>+</span> Manage projects
+        </button>
+      </div>
+      <div style={{marginTop:"auto",paddingTop:16,borderTop:`1px solid ${C.border}`}}>
+        <div style={{fontSize:11,color:C.textDim,padding:"0 10px"}}>{openTasks} open · {doneTasks} done</div>
+      </div>
+    </>
+  );
+
+  return(
+    <div style={{display:"flex",height:"100dvh",background:C.bg,color:C.text,overflow:"hidden",position:"relative"}}>
+      <style>{`
+        @media(min-width:640px){
+          .dsk{display:flex!important;flex-shrink:0;height:100%;width:210px;background:${C.surface};border-right:1px solid ${C.border};flex-direction:column;padding:20px 12px;overflow-y:auto;}
+          .mob-hdr{display:none!important;}
+          .mob-nav{display:none!important;}
+          .main{padding:32px 36px!important;}
+        }
+        @media(max-width:639px){
+          .dsk{display:none!important;}
+          .main{padding:72px 14px 90px!important;}
+        }
+      `}</style>
+
+      {openTask&&(
+        <TaskDetailPanel
+          task={openTask}
+          projects={projects}
+          onSave={t=>{saveTask(t);setOpenTask(ts=>ts&&ts.id===t.id?t:ts);}}
+          onClose={()=>setOpenTask(null)}
+          onDelete={del}
+          onArchive={archiveTask}
+          onToggle={toggle}
+        />
+      )}
+
+      <div className="dsk"><SidebarContent/></div>
+
+      {sidebarOpen&&(
+        <div style={{position:"fixed",inset:0,zIndex:100,display:"flex"}}>
+          <div onClick={()=>setSidebarOpen(false)} style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(2px)"}}/>
+          <div style={{position:"relative",zIndex:101,width:260,height:"100%",background:C.surface,overflowY:"auto",padding:"20px 12px",display:"flex",flexDirection:"column"}}>
+            <SidebarContent/>
+          </div>
+        </div>
+      )}
+
+      <div className="mob-hdr" style={{position:"fixed",top:0,left:0,right:0,zIndex:50,background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12,padding:"12px 16px",paddingTop:"max(12px,env(safe-area-inset-top))"}}>
+        <button onClick={()=>setSidebarOpen(true)} style={{background:"none",border:"none",color:C.text,fontSize:20,cursor:"pointer",lineHeight:1,padding:4}}>☰</button>
+        <span style={{fontSize:15,fontWeight:800,color:C.text}}>◈ WorkDay</span>
+        <span style={{marginLeft:"auto",fontSize:12,color:C.textMuted}}>{today.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+      </div>
+
+      <div className="main" style={{flex:1,overflowY:"auto",padding:"80px 14px 90px",WebkitOverflowScrolling:"touch"}}>
+        {view==="today"&&<TodayView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onArchiveTask={archiveTask} onAdd={add}/>}
+        {view==="projects"&&<ProjectsView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onArchiveTask={archiveTask} onAdd={add} onAddProject={addProject} onEditProject={editProject} onDeleteProject={deleteProject} onArchiveProject={archiveProject} onReorderProjects={reorderProjects}/>}
+        {view==="calendar"&&<CalendarView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onAdd={add}/>}
+      </div>
+
+      <div className="mob-nav" style={{position:"fixed",bottom:0,left:0,right:0,background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:"max(12px,env(safe-area-inset-bottom))"}}>
+        {NAV.map(n=>(
+          <button key={n.id} onClick={()=>setView(n.id)}
+            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:view===n.id?C.accent:C.textDim}}>
+            <span style={{fontSize:18}}>{n.icon}</span>
+            <span style={{fontSize:10,fontWeight:view===n.id?700:400}}>{n.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
