@@ -1244,9 +1244,11 @@ function SidebarClock(){
 // ── GOOGLE SHEETS SYNC ────────────────────────────────────────
 const SCRIPT_URL="https://script.google.com/macros/s/AKfycbzKa6zl84o3DDTsLzA4KjvQJi6wZzaGcuGJCf_tsEj3rE77uPtBEJuAeeoqIVHc0hal/exec";
 
+const SECRET_KEY="KCKS2026";
+
 async function gLoad(){
   try{
-    const r=await fetch(SCRIPT_URL+"?action=load");
+    const r=await fetch(SCRIPT_URL+"?action=load&key="+SECRET_KEY);
     const j=await r.json();
     if(j.ok&&j.data)return j.data;
   }catch(e){console.warn("Sheet load failed",e);}
@@ -1255,12 +1257,11 @@ async function gLoad(){
 
 async function gSave(data){
   try{
-    // Use GET with encoded data to avoid CORS preflight issues
     const encoded = encodeURIComponent(JSON.stringify(data));
-    const url = SCRIPT_URL + "?action=save&data=" + encoded;
+    const url = SCRIPT_URL + "?action=save&key=" + SECRET_KEY + "&data=" + encoded;
     const r = await fetch(url);
     const j = await r.json();
-    if(!j.ok) console.warn("Sheet save returned error",j);
+    if(!j.ok) console.warn("Sheet save error",j);
   }catch(e){console.warn("Sheet save failed",e);}
 }
 
