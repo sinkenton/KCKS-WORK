@@ -760,6 +760,24 @@ function CalendarView({tasks,projects,onToggle,onEdit,onDelete,onAdd}){
   );
 }
 
+// ── GOOGLE SHEETS SYNC ────────────────────────────────────────
+const SCRIPT_URL="https://script.google.com/macros/s/AKfycbzkWaTZYLrt0QA17aUP8oAIr63vGaMSK8YhFoxbN9gfHCAo80IsfPZjoX3uVTZT79Cu/exec";
+
+async function gLoad(){
+  try{
+    const r=await fetch(SCRIPT_URL+"?action=load");
+    const j=await r.json();
+    if(j.ok&&j.data)return j.data;
+  }catch(e){console.warn("Sheet load failed",e);}
+  return null;
+}
+
+async function gSave(data){
+  try{
+    await fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"save",data})});
+  }catch(e){console.warn("Sheet save failed",e);}
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App(){
   const [tasks,setTasks]=useState(()=>load("wd_tasks",DEFAULT_TASKS));
@@ -768,23 +786,59 @@ function App(){
   const [nextId,setNextId]=useState(()=>load("wd_nextid",200));
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [openTask,setOpenTask]=useState(null);
+  const [syncStatus,setSyncStatus]=useState("idle"); // idle | syncing | saved | error
+  const syncTimer=useRef(null);
 
-  useEffect(()=>save("wd_tasks",tasks),[tasks]);
-  useEffect(()=>save("wd_projects",projects),[projects]);
+  // ── Load from Google Sheets on startup ──
+  useEffect(()=>{
+    setSyncStatus("syncing");
+    gLoad().then(data=>{
+      if(data){
+        if(data.wd_tasks){setTasks(data.wd_tasks);save("wd_tasks",data.wd_tasks);}
+        if(data.wd_projects){setProjects(data.wd_projects);save("wd_projects",data.wd_projects);}
+        if(data.wd_nextid){setNextId(data.wd_nextid);save("wd_nextid",data.wd_nextid);}
+        if(data.wd_view){setView(data.wd_view);save("wd_view",data.wd_view);}
+        setSyncStatus("saved");
+      } else {
+        setSyncStatus("idle");
+      }
+    });
+  },[]);
+
+  // ── Save to localStorage immediately, debounce Google Sheets ──
+  const pushToSheet=useCallback((t,p,n,v)=>{
+    save("wd_tasks",t);save("wd_projects",p);save("wd_nextid",n);save("wd_view",v);
+    setSyncStatus("syncing");
+    clearTimeout(syncTimer.current);
+    syncTimer.current=setTimeout(()=>{
+      gSave({wd_tasks:t,wd_projects:p,wd_nextid:n,wd_view:v})
+        .then(()=>setSyncStatus("saved"))
+        .catch(()=>setSyncStatus("error"));
+    },1500);
+  },[]);
+
   useEffect(()=>save("wd_view",view),[view]);
-  useEffect(()=>save("wd_nextid",nextId),[nextId]);
 
-  const toggle=id=>setTasks(ts=>ts.map(t=>t.id===id?{...t,done:!t.done}:t));
-  const del=id=>setTasks(ts=>ts.filter(t=>t.id!==id));
-  const add=task=>{setTasks(ts=>[...ts,{...task,id:nextId,done:false,archived:false}]);setNextId(n=>n+1);};
-  const saveTask=updated=>setTasks(ts=>ts.map(t=>t.id===updated.id?updated:t));
-  const archiveTask=(id,val)=>setTasks(ts=>ts.map(t=>t.id===id?{...t,archived:val}:t));
+  const toggle=id=>{setTasks(ts=>{const u=ts.map(t=>t.id===id?{...t,done:!t.done}:t);pushToSheet(u,projects,nextId,view);return u;});};
+  const del=id=>{setTasks(ts=>{const u=ts.filter(t=>t.id!==id);pushToSheet(u,projects,nextId,view);return u;});};
+  const add=task=>{
+    const newTask={...task,id:nextId,done:false,archived:false};
+    const newNextId=nextId+1;
+    setTasks(ts=>{const u=[...ts,newTask];pushToSheet(u,projects,newNextId,view);return u;});
+    setNextId(newNextId);
+  };
+  const saveTask=updated=>{setTasks(ts=>{const u=ts.map(t=>t.id===updated.id?updated:t);pushToSheet(u,projects,nextId,view);return u;});};
+  const archiveTask=(id,val)=>{setTasks(ts=>{const u=ts.map(t=>t.id===id?{...t,archived:val}:t);pushToSheet(u,projects,nextId,view);return u;});};
 
-  const addProject=({name,colorIdx})=>setProjects(ps=>[...ps,{id:uid(),name,colorIdx,archived:false}]);
-  const editProject=updated=>setProjects(ps=>ps.map(p=>p.id===updated.id?updated:p));
-  const deleteProject=id=>{setProjects(ps=>ps.filter(p=>p.id!==id));setTasks(ts=>ts.filter(t=>t.projectId!==id));};
-  const archiveProject=(id,val)=>setProjects(ps=>ps.map(p=>p.id===id?{...p,archived:val}:p));
-  const reorderProjects=newOrder=>setProjects(newOrder);
+  const addProject=({name,colorIdx})=>{setProjects(ps=>{const u=[...ps,{id:uid(),name,colorIdx,archived:false}];pushToSheet(tasks,u,nextId,view);return u;});};
+  const editProject=updated=>{setProjects(ps=>{const u=ps.map(p=>p.id===updated.id?updated:p);pushToSheet(tasks,u,nextId,view);return u;});};
+  const deleteProject=id=>{
+    setProjects(ps=>{const up=ps.filter(p=>p.id!==id);
+    setTasks(ts=>{const ut=ts.filter(t=>t.projectId!==id);pushToSheet(ut,up,nextId,view);return ut;});
+    return up;});
+  };
+  const archiveProject=(id,val)=>{setProjects(ps=>{const u=ps.map(p=>p.id===id?{...p,archived:val}:p);pushToSheet(tasks,u,nextId,view);return u;});};
+  const reorderProjects=newOrder=>{setProjects(newOrder);pushToSheet(tasks,newOrder,nextId,view);};
 
   const NAV=[{id:"today",label:"Today",icon:"◈"},{id:"projects",label:"Projects",icon:"⬡"},{id:"calendar",label:"Calendar",icon:"▦"}];
   const setViewAndClose=v=>{setView(v);setSidebarOpen(false);};
@@ -822,7 +876,10 @@ function App(){
         </button>
       </div>
       <div style={{marginTop:"auto",paddingTop:16,borderTop:`1px solid ${C.border}`}}>
-        <div style={{fontSize:11,color:C.textDim,padding:"0 10px"}}>{openTasks} open · {doneTasks} done</div>
+        <div style={{fontSize:11,color:C.textDim,padding:"0 10px",marginBottom:4}}>{openTasks} open · {doneTasks} done</div>
+        <div style={{fontSize:10,padding:"0 10px",color:syncStatus==="saved"?C.done:syncStatus==="syncing"?C.accent:syncStatus==="error"?C.danger:C.textDim}}>
+          {syncStatus==="syncing"?"⟳ Syncing…":syncStatus==="saved"?"✓ Synced to Google":"⚠ Offline mode"}
+        </div>
       </div>
     </>
   );
@@ -868,7 +925,9 @@ function App(){
       <div className="mob-hdr" style={{position:"fixed",top:0,left:0,right:0,zIndex:50,background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12,padding:"12px 16px",paddingTop:"max(12px,env(safe-area-inset-top))"}}>
         <button onClick={()=>setSidebarOpen(true)} style={{background:"none",border:"none",color:C.text,fontSize:20,cursor:"pointer",lineHeight:1,padding:4}}>☰</button>
         <span style={{fontSize:15,fontWeight:800,color:C.text}}>◈ WorkDay</span>
-        <span style={{marginLeft:"auto",fontSize:12,color:C.textMuted}}>{today.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+        <span style={{marginLeft:"auto",fontSize:11,color:syncStatus==="saved"?C.done:syncStatus==="syncing"?C.accent:syncStatus==="error"?C.danger:C.textDim}}>
+          {syncStatus==="syncing"?"⟳ Syncing…":syncStatus==="saved"?"✓ Saved":syncStatus==="error"?"⚠ Offline":today.toLocaleDateString("en-US",{month:"short",day:"numeric"})}
+        </span>
       </div>
 
       <div className="main" style={{flex:1,overflowY:"auto",padding:"80px 14px 90px",WebkitOverflowScrolling:"touch"}}>
