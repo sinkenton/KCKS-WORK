@@ -1385,7 +1385,7 @@ function App(){
         }
         @media(max-width:639px){
           .dsk{display:none!important;}
-          .main{padding:90px 14px 100px!important;}
+          .main{padding:110px 14px 110px!important;}
         }
       `}</style>
 
@@ -1412,7 +1412,7 @@ function App(){
         </div>
       )}
 
-      <div className="mob-hdr" style={{position:"fixed",top:0,left:0,right:0,zIndex:50,background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12,padding:"12px 16px",paddingTop:"max(12px,env(safe-area-inset-top))"}}>
+      <div className="mob-hdr" style={{position:"fixed",top:0,left:0,right:0,zIndex:50,background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12,padding:"14px 16px 14px",paddingTop:"max(44px,env(safe-area-inset-top,44px))"}}>
         <button onClick={()=>setSidebarOpen(true)} style={{background:"none",border:"none",color:C.text,fontSize:20,cursor:"pointer",lineHeight:1,padding:4}}>☰</button>
         <MilitaryClock size="mob"/>
         <span style={{marginLeft:"auto",fontSize:11,color:syncStatus==="saved"?C.done:syncStatus==="syncing"?C.accent:syncStatus==="error"?C.danger:C.textDim}}>
