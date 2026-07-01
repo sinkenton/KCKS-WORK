@@ -456,7 +456,7 @@ function TodayView({tasks,projects,onToggle,onEdit,onDelete,onArchiveTask,onAdd}
   const done=todayTasks.filter(t=>t.done).length;
   const pct=todayTasks.length?Math.round((done/todayTasks.length)*100):0;
   return(
-    <div>
+    <div style={{paddingTop:2}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:24}}>
         <div>
           <div style={{fontSize:12,color:C.accent,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>{today.toLocaleDateString("en-US",{weekday:"long"})}</div>
@@ -497,6 +497,8 @@ function ProjectsView({tasks,projects,onToggle,onEdit,onDelete,onArchiveTask,onA
   const [confirmDelete,setConfirmDelete]=useState(null);
   const [editingProject,setEditingProject]=useState(null);
   const [showArchived,setShowArchived]=useState(false);
+  // scroll to top on mount
+  useEffect(()=>window.scrollTo(0,0),[]);
   const dragItem=useRef(null);
   const dragOver=useRef(null);
 
@@ -1385,7 +1387,7 @@ function App(){
         }
         @media(max-width:639px){
           .dsk{display:none!important;}
-          .main{padding:110px 14px 110px!important;}
+          .main{padding-top:calc(env(safe-area-inset-top,0px) + 80px)!important;padding-bottom:110px!important;padding-left:14px!important;padding-right:14px!important;}
         }
       `}</style>
 
