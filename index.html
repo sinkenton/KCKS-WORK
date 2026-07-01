@@ -2,22 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="WorkDay"/>
+<meta name="apple-mobile-web-app-title" content="KCKS"/>
 <meta name="theme-color" content="#0F1117"/>
 <link rel="manifest" href="/KCKS-WORK/manifest.json"/>
 <link rel="apple-touch-icon" href="/KCKS-WORK/icon-192.png"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<title>WorkDay</title>
+<title>KCKS</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body,#root{height:100%;width:100%;overflow:hidden;}
-body{background:#0F1117;font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;}
+body{background:#0F1117;font-family:'JetBrains Mono',monospace;}
 input,select,textarea,button{font-family:inherit;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
@@ -278,6 +280,43 @@ function TaskDetailPanel({task,projects,onSave,onClose,onDelete,onArchive,onTogg
               <button onClick={addDeliverable} style={{background:C.surfaceHi,border:`1px solid ${C.border}`,color:C.accent,borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:600}}>+</button>
             </div>
           </div>
+          {/* Time Tracker */}
+          <div style={field}>
+            <span style={lbl}>Time Tracker</span>
+            <TimerWidget task={task} onSave={onSave}/>
+          </div>
+
+          {/* Recurring */}
+          <div style={field}>
+            <span style={lbl}>Recurring</span>
+            <select value={task.recurring||"none"} onChange={e=>onSave({...task,recurring:e.target.value})}
+              style={{...inp}}>
+              <option value="none">One-time</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+
+          {/* Links */}
+          <div style={field}>
+            <span style={lbl}>Links</span>
+            {(task.links||[]).map((link,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <a href={link} target="_blank" rel="noopener noreferrer"
+                  style={{flex:1,fontSize:12,color:C.accent,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{link}</a>
+                <button onClick={()=>onSave({...task,links:(task.links||[]).filter((_,j)=>j!==i)})}
+                  style={{background:"none",border:"none",color:C.textDim,cursor:"pointer",fontSize:15}}>×</button>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:6}}>
+              <input id={`link-inp-${task.id}`} placeholder="https://…" style={{...inp,flex:1}}
+                onKeyDown={e=>{if(e.key==="Enter"&&e.target.value.trim()){onSave({...task,links:[...(task.links||[]),e.target.value.trim()]});e.target.value="";}}}/>
+              <button onClick={()=>{const el=document.getElementById(`link-inp-${task.id}`);if(el&&el.value.trim()){onSave({...task,links:[...(task.links||[]),el.value.trim()]});el.value="";}}}
+                style={{background:C.surfaceHi,border:`1px solid ${C.border}`,color:C.accent,borderRadius:8,padding:"8px 14px",fontSize:13,cursor:"pointer",fontWeight:600}}>+</button>
+            </div>
+          </div>
+
           {/* Notes */}
           <div style={field}>
             <span style={lbl}>Notes</span>
@@ -778,6 +817,406 @@ function CalendarView({tasks,projects,onToggle,onEdit,onDelete,onAdd}){
   );
 }
 
+
+// ── TIMER HOOK ─────────────────────────────────────────────────
+function useTaskTimer(task, onSave) {
+  const [secs, setSecs] = useState(task.timerSeconds||0);
+  const [running, setRunning] = useState(false);
+  const intervalRef = useRef(null);
+
+  useEffect(()=>{ setSecs(task.timerSeconds||0); },[task.id]);
+
+  const start = () => {
+    setRunning(true);
+    intervalRef.current = setInterval(()=>setSecs(s=>s+1), 1000);
+  };
+  const pause = () => {
+    setRunning(false);
+    clearInterval(intervalRef.current);
+    onSave({...task, timerSeconds: secs, timerRunning: false});
+  };
+  const reset = () => {
+    setRunning(false);
+    clearInterval(intervalRef.current);
+    setSecs(0);
+    onSave({...task, timerSeconds: 0, timerRunning: false});
+  };
+
+  useEffect(()=>()=>clearInterval(intervalRef.current),[]);
+
+  const fmt = s => {
+    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+    return h>0 ? `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}` : `${m}:${String(sec).padStart(2,"0")}`;
+  };
+
+  return { secs, running, start, pause, reset, fmt };
+}
+
+// ── TIMER WIDGET (used in TaskDetailPanel) ─────────────────────
+function TimerWidget({task, onSave}){
+  const {secs,running,start,pause,reset,fmt}=useTaskTimer(task,onSave);
+  return(
+    <div style={{background:C.surfaceHi,border:`1px solid ${C.border}`,borderRadius:10,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+      <span style={{fontSize:22,fontWeight:800,color:running?C.accent:C.text,fontVariantNumeric:"tabular-nums",minWidth:80}}>{fmt(secs)}</span>
+      <button onClick={running?pause:start}
+        style={{background:running?C.danger:C.accent,color:"#fff",border:"none",borderRadius:7,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+        {running?"⏸ Pause":"▶ Start"}
+      </button>
+      <button onClick={reset} style={{background:"none",border:`1px solid ${C.border}`,color:C.textMuted,borderRadius:7,padding:"6px 12px",fontSize:13,cursor:"pointer"}}>↺</button>
+      {secs>0&&<span style={{fontSize:11,color:C.textMuted}}>{Math.round(secs/3600*10)/10}h logged</span>}
+    </div>
+  );
+}
+
+// ── BROWSER NOTIFICATIONS ──────────────────────────────────────
+function scheduleNotification(task){
+  if(!("Notification" in window))return;
+  if(Notification.permission!=="granted"){
+    Notification.requestPermission();
+    return;
+  }
+  if(!task.date||!task.time)return;
+  const [h,m]=task.time.split(":").map(Number);
+  const taskTime=new Date(task.date+"T00:00:00");
+  taskTime.setHours(h,m,0,0);
+  const notifyAt=new Date(taskTime.getTime()-10*60*1000); // 10 min before
+  const now=new Date();
+  const delay=notifyAt-now;
+  if(delay<0)return;
+  setTimeout(()=>{
+    new Notification("KCKS — Task starting soon",{
+      body:`${task.title} starts in 10 minutes`,
+      icon:"/KCKS-WORK/icon-192.png",
+    });
+  },delay);
+}
+
+// ── RECURRING TASK HELPER ──────────────────────────────────────
+function nextRecurringDate(task){
+  if(!task.recurring||task.recurring==="none")return null;
+  const base=new Date((task.date||isoDate(today))+"T12:00:00");
+  if(task.recurring==="daily"){base.setDate(base.getDate()+1);}
+  else if(task.recurring==="weekly"){base.setDate(base.getDate()+7);}
+  else if(task.recurring==="monthly"){base.setMonth(base.getMonth()+1);}
+  return isoDate(base);
+}
+
+// ── KANBAN VIEW ────────────────────────────────────────────────
+function KanbanView({tasks,projects,onToggle,onEdit,onDelete,onSaveTask,onAdd}){
+  const [adding,setAdding]=useState(null);
+  const COLS=[
+    {id:"not-started",label:"Not Started",color:C.textDim},
+    {id:"in-progress",label:"In Progress",color:C.accent},
+    {id:"blocked",label:"Blocked",color:"#E06C75"},
+    {id:"review",label:"In Review",color:"#E5C07B"},
+    {id:"done",label:"Done",color:C.done},
+  ];
+  const active=tasks.filter(t=>!t.archived);
+
+  const handleDrop=(e,colId)=>{
+    e.preventDefault();
+    const taskId=e.dataTransfer.getData("taskId");
+    const task=tasks.find(t=>String(t.id)===taskId);
+    if(task)onSaveTask({...task,status:colId,done:colId==="done"});
+  };
+
+  return(
+    <div>
+      <div style={{fontSize:24,fontWeight:800,color:C.text,marginBottom:20}}>Kanban</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,minHeight:400,overflowX:"auto"}}>
+        {COLS.map(col=>{
+          const colTasks=active.filter(t=>(t.status||"not-started")===col.id);
+          return(
+            <div key={col.id}
+              onDragOver={e=>e.preventDefault()}
+              onDrop={e=>handleDrop(e,col.id)}
+              style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:10,minHeight:200}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>
+                <span style={{width:8,height:8,borderRadius:"50%",background:col.color,flexShrink:0}}/>
+                <span style={{fontSize:11,fontWeight:700,color:col.color,textTransform:"uppercase",letterSpacing:0.5}}>{col.label}</span>
+                <span style={{marginLeft:"auto",fontSize:10,color:C.textDim,background:C.surfaceHi,borderRadius:99,padding:"1px 6px"}}>{colTasks.length}</span>
+              </div>
+              {colTasks.map(t=>{
+                const proj=projects.find(p=>p.id===t.projectId);
+                const pc=PC[proj?.colorIdx??0];
+                return(
+                  <div key={t.id}
+                    draggable
+                    onDragStart={e=>e.dataTransfer.setData("taskId",String(t.id))}
+                    onClick={()=>onEdit(t)}
+                    style={{background:C.surfaceHi,border:`1px solid ${C.border}`,borderLeft:`3px solid ${pc.bg}`,borderRadius:8,padding:"10px 10px",marginBottom:8,cursor:"pointer",transition:"transform 0.1s"}}
+                    onMouseEnter={e=>e.currentTarget.style.transform="translateY(-1px)"}
+                    onMouseLeave={e=>e.currentTarget.style.transform="translateY(0)"}>
+                    <div style={{fontSize:12,color:C.text,fontWeight:600,marginBottom:6,lineHeight:1.4}}>{t.title}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:PRI[t.priority].dot,flexShrink:0}}/>
+                      {proj&&<span style={{fontSize:9,color:pc.label,background:pc.dim,borderRadius:3,padding:"1px 5px"}}>{proj.name}</span>}
+                      {t.date&&<span style={{fontSize:9,color:C.textDim,marginLeft:"auto"}}>{t.date.slice(5)}</span>}
+                    </div>
+                    {t.deliverables&&t.deliverables.length>0&&(
+                      <div style={{marginTop:6,background:C.border,borderRadius:99,height:3,overflow:"hidden"}}>
+                        <div style={{width:`${Math.round((t.deliverables.filter(d=>d.done).length/t.deliverables.length)*100)}%`,height:"100%",background:C.done}}/>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <button onClick={()=>setAdding(col.id)}
+                style={{width:"100%",background:"none",border:`1px dashed ${C.border}`,borderRadius:8,padding:"8px",fontSize:12,color:C.textDim,cursor:"pointer",marginTop:4}}>+ Add task</button>
+            </div>
+          );
+        })}
+      </div>
+      {adding&&(
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:13,color:C.textMuted,marginBottom:8}}>Adding to <strong style={{color:COLS.find(c=>c.id===adding)?.color}}>{COLS.find(c=>c.id===adding)?.label}</strong></div>
+          <AddTaskForm projects={projects} onAdd={t=>{onAdd({...t,status:adding});setAdding(null);}} onCancel={()=>setAdding(null)}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DASHBOARD VIEW ─────────────────────────────────────────────
+function DashboardView({tasks,projects}){
+  const active=tasks.filter(t=>!t.archived);
+  const done=active.filter(t=>t.done);
+  const open=active.filter(t=>!t.done);
+  const overdue=open.filter(t=>t.dueDate&&t.dueDate<isoDate(today));
+  const todayTasks=active.filter(t=>t.date===isoDate(today));
+  const todayDone=todayTasks.filter(t=>t.done).length;
+
+  // Tasks completed per day last 7 days
+  const last7=Array.from({length:7},(_,i)=>{
+    const d=new Date(today); d.setDate(d.getDate()-6+i);
+    const ds=isoDate(d);
+    return{
+      label:d.toLocaleDateString("en-US",{weekday:"short"}),
+      date:ds,
+      count:done.filter(t=>t.date===ds).length,
+      total:active.filter(t=>t.date===ds).length,
+    };
+  });
+  const maxCount=Math.max(...last7.map(d=>d.total),1);
+
+  // By project
+  const projStats=projects.filter(p=>!p.archived).map(p=>({
+    proj:p,
+    total:active.filter(t=>t.projectId===p.id).length,
+    done:done.filter(t=>t.projectId===p.id).length,
+  })).filter(s=>s.total>0);
+
+  // By priority
+  const priStats=["high","medium","low"].map(pri=>({
+    pri,count:open.filter(t=>t.priority===pri).length,
+    color:PRI[pri].dot,
+  }));
+
+  const card=(children,extra={})=>(
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:18,...extra}}>{children}</div>
+  );
+
+  return(
+    <div>
+      <div style={{fontSize:24,fontWeight:800,color:C.text,marginBottom:20}}>Dashboard</div>
+
+      {/* Top stats */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16}}>
+        {[
+          {label:"Open Tasks",val:open.length,color:C.accent},
+          {label:"Done Today",val:`${todayDone}/${todayTasks.length}`,color:C.done},
+          {label:"Overdue",val:overdue.length,color:overdue.length>0?"#E06C75":C.textDim},
+          {label:"Total Done",val:done.length,color:C.textMuted},
+        ].map(s=>(
+          <div key={s.label} style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,padding:"14px 16px",textAlign:"center"}}>
+            <div style={{fontSize:26,fontWeight:800,color:s.color,marginBottom:4}}>{s.val}</div>
+            <div style={{fontSize:11,color:C.textMuted,textTransform:"uppercase",letterSpacing:0.5}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        {/* 7-day bar chart */}
+        {card(
+          <>
+            <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:14}}>Last 7 Days</div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:8,height:80}}>
+              {last7.map(d=>(
+                <div key={d.date} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+                  <div style={{width:"100%",display:"flex",flexDirection:"column",justifyContent:"flex-end",height:64,gap:2}}>
+                    {d.total>0&&<div style={{width:"100%",height:`${(d.total/maxCount)*60}px`,background:C.border,borderRadius:"3px 3px 0 0",position:"relative",overflow:"hidden"}}>
+                      <div style={{position:"absolute",bottom:0,width:"100%",height:`${(d.done/d.total)*100}%`,background:C.done,borderRadius:"3px 3px 0 0"}}/>
+                    </div>}
+                  </div>
+                  <div style={{fontSize:9,color:d.date===isoDate(today)?C.accent:C.textDim,fontWeight:d.date===isoDate(today)?700:400}}>{d.label}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:12,marginTop:10}}>
+              <span style={{fontSize:10,color:C.textMuted,display:"flex",alignItems:"center",gap:4}}><span style={{width:8,height:8,borderRadius:2,background:C.done,display:"inline-block"}}/>Done</span>
+              <span style={{fontSize:10,color:C.textMuted,display:"flex",alignItems:"center",gap:4}}><span style={{width:8,height:8,borderRadius:2,background:C.border,display:"inline-block"}}/>Total</span>
+            </div>
+          </>
+        )}
+
+        {/* Priority breakdown */}
+        {card(
+          <>
+            <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:14}}>Open by Priority</div>
+            {priStats.map(s=>(
+              <div key={s.pri} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{fontSize:12,color:C.text,textTransform:"capitalize"}}>{s.pri}</span>
+                  <span style={{fontSize:12,color:C.textMuted}}>{s.count}</span>
+                </div>
+                <div style={{background:C.border,borderRadius:99,height:5,overflow:"hidden"}}>
+                  <div style={{width:`${open.length?Math.round((s.count/open.length)*100):0}%`,height:"100%",background:s.color,borderRadius:99,transition:"width 0.4s"}}/>
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+
+      {/* Project progress */}
+      {card(
+        <>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:14}}>Projects</div>
+          {projStats.length===0&&<div style={{fontSize:13,color:C.textDim}}>No projects yet.</div>}
+          {projStats.map(s=>{
+            const pc=PC[s.proj.colorIdx];
+            const pct=s.total?Math.round((s.done/s.total)*100):0;
+            return(
+              <div key={s.proj.id} style={{marginBottom:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                  <span style={{width:8,height:8,borderRadius:"50%",background:pc.bg,flexShrink:0}}/>
+                  <span style={{fontSize:12,color:C.text,flex:1}}>{s.proj.name}</span>
+                  <span style={{fontSize:11,color:C.textMuted}}>{s.done}/{s.total}</span>
+                  <span style={{fontSize:11,color:pct===100?C.done:C.textMuted,fontWeight:700}}>{pct}%</span>
+                </div>
+                <div style={{background:C.border,borderRadius:99,height:5,overflow:"hidden"}}>
+                  <div style={{width:`${pct}%`,height:"100%",background:pc.bg,borderRadius:99,transition:"width 0.4s"}}/>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Overdue tasks */}
+      {overdue.length>0&&(
+        <div style={{marginTop:10}}>
+          {card(
+            <>
+              <div style={{fontSize:13,fontWeight:700,color:"#E06C75",marginBottom:12}}>⚠ Overdue ({overdue.length})</div>
+              {overdue.map(t=>{
+                const proj=projects.find(p=>p.id===t.projectId);
+                const pc=PC[proj?.colorIdx??0];
+                return(
+                  <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:`1px solid ${C.border}`}}>
+                    <span style={{width:6,height:6,borderRadius:"50%",background:pc.bg,flexShrink:0}}/>
+                    <span style={{flex:1,fontSize:12,color:C.text}}>{t.title}</span>
+                    <span style={{fontSize:11,color:"#E06C75"}}>{t.dueDate}</span>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SEARCH VIEW ────────────────────────────────────────────────
+function SearchView({tasks,projects,onToggle,onEdit,onDelete,onArchiveTask}){
+  const [q,setQ]=useState("");
+  const [filter,setFilter]=useState("all");
+  const inp=useRef();
+  useEffect(()=>{setTimeout(()=>inp.current?.focus(),100);},[]);
+
+  const results=useMemo(()=>{
+    if(!q.trim())return[];
+    const lq=q.toLowerCase();
+    return tasks.filter(t=>{
+      if(filter==="open"&&t.done)return false;
+      if(filter==="done"&&!t.done)return false;
+      if(filter==="archived"&&!t.archived)return false;
+      if(filter!=="archived"&&t.archived)return false;
+      return(
+        t.title?.toLowerCase().includes(lq)||
+        t.description?.toLowerCase().includes(lq)||
+        t.notes?.toLowerCase().includes(lq)||
+        t.assignee?.toLowerCase().includes(lq)||
+        (t.tags||[]).some(tag=>tag.toLowerCase().includes(lq))||
+        projects.find(p=>p.id===t.projectId)?.name?.toLowerCase().includes(lq)
+      );
+    });
+  },[q,tasks,projects,filter]);
+
+  const highlight=(text,q)=>{
+    if(!text||!q)return text;
+    const idx=text.toLowerCase().indexOf(q.toLowerCase());
+    if(idx===-1)return text;
+    return<>{text.slice(0,idx)}<mark style={{background:C.accentDim,color:C.accent,borderRadius:2}}>{text.slice(idx,idx+q.length)}</mark>{text.slice(idx+q.length)}</>;
+  };
+
+  return(
+    <div>
+      <div style={{fontSize:24,fontWeight:800,color:C.text,marginBottom:20}}>Search</div>
+      <input ref={inp} value={q} onChange={e=>setQ(e.target.value)}
+        placeholder="Search tasks, notes, tags, assignees…"
+        style={{width:"100%",background:C.surface,border:`1px solid ${C.borderHi}`,borderRadius:10,padding:"12px 16px",fontSize:15,color:C.text,outline:"none",marginBottom:12}}/>
+      <div style={{display:"flex",gap:6,marginBottom:16}}>
+        {["all","open","done","archived"].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)}
+            style={{background:filter===f?C.accent:C.surface,color:filter===f?"#fff":C.textMuted,border:`1px solid ${filter===f?C.accent:C.border}`,borderRadius:6,padding:"5px 12px",fontSize:12,cursor:"pointer",fontWeight:filter===f?700:400,textTransform:"capitalize"}}>
+            {f}
+          </button>
+        ))}
+      </div>
+      {q&&results.length===0&&<div style={{color:C.textDim,fontSize:14,textAlign:"center",padding:40}}>No results for "{q}"</div>}
+      {results.length>0&&(
+        <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:12,overflow:"hidden"}}>
+          <div style={{fontSize:11,color:C.textMuted,padding:"8px 14px",borderBottom:`1px solid ${C.border}`}}>{results.length} result{results.length!==1?"s":""}</div>
+          {results.map(t=>{
+            const proj=projects.find(p=>p.id===t.projectId);
+            const pc=PC[proj?.colorIdx??0];
+            return(
+              <div key={t.id} onClick={()=>onEdit(t)}
+                style={{display:"flex",alignItems:"flex-start",gap:10,padding:"12px 14px",borderBottom:`1px solid ${C.border}`,cursor:"pointer",borderLeft:`3px solid ${pc.bg}`}}>
+                <button onClick={e=>{e.stopPropagation();onToggle(t.id);}}
+                  style={{width:18,height:18,borderRadius:"50%",flexShrink:0,border:`2px solid ${t.done?C.done:pc.bg}`,background:t.done?C.done:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",minWidth:18,marginTop:2}}>
+                  {t.done&&<span style={{color:"#fff",fontSize:10}}>✓</span>}
+                </button>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,color:t.done?C.textMuted:C.text,textDecoration:t.done?"line-through":"none",marginBottom:3}}>{highlight(t.title,q)}</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                    {proj&&<span style={{fontSize:10,color:pc.label,background:pc.dim,borderRadius:3,padding:"1px 5px"}}>{proj.name}</span>}
+                    {t.date&&<span style={{fontSize:10,color:C.textDim}}>{t.date}</span>}
+                    {t.priority&&<span style={{width:6,height:6,borderRadius:"50%",background:PRI[t.priority].dot,display:"inline-block"}}/>}
+                    {(t.tags||[]).map(tag=><span key={tag} style={{fontSize:9,color:C.textMuted,background:C.surfaceHi,borderRadius:3,padding:"1px 5px"}}>{highlight(tag,q)}</span>)}
+                  </div>
+                  {t.description&&q&&t.description.toLowerCase().includes(q.toLowerCase())&&(
+                    <div style={{fontSize:11,color:C.textMuted,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{highlight(t.description,q)}</div>
+                  )}
+                </div>
+                <span style={{fontSize:10,color:C.textDim,flexShrink:0}}>↗</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {!q&&(
+        <div style={{textAlign:"center",padding:"60px 0",color:C.textDim,fontSize:14}}>
+          <div style={{fontSize:32,marginBottom:12}}>⌕</div>
+          Type to search across all tasks, notes and tags
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── GOOGLE SHEETS SYNC ────────────────────────────────────────
 const SCRIPT_URL="https://script.google.com/macros/s/AKfycbzKa6zl84o3DDTsLzA4KjvQJi6wZzaGcuGJCf_tsEj3rE77uPtBEJuAeeoqIVHc0hal/exec";
 
@@ -845,12 +1284,18 @@ function App(){
   const toggle=id=>{setTasks(ts=>{const u=ts.map(t=>t.id===id?{...t,done:!t.done}:t);pushToSheet(u,projects,nextId,view);return u;});};
   const del=id=>{setTasks(ts=>{const u=ts.filter(t=>t.id!==id);pushToSheet(u,projects,nextId,view);return u;});};
   const add=task=>{
-    const newTask={...task,id:nextId,done:false,archived:false};
+    const newTask={...task,id:nextId,done:false,archived:false,timerRunning:false,timerSeconds:0,timerStart:null,dependencies:[],links:[]};
     const newNextId=nextId+1;
     setTasks(ts=>{const u=[...ts,newTask];pushToSheet(u,projects,newNextId,view);return u;});
     setNextId(newNextId);
+    scheduleNotification(newTask);
+    // Request notification permission on first task add
+    if("Notification" in window && Notification.permission==="default") Notification.requestPermission();
   };
-  const saveTask=updated=>{setTasks(ts=>{const u=ts.map(t=>t.id===updated.id?updated:t);pushToSheet(u,projects,nextId,view);return u;});};
+  const saveTask=updated=>{
+    setTasks(ts=>{const u=ts.map(t=>t.id===updated.id?updated:t);pushToSheet(u,projects,nextId,view);return u;});
+    scheduleNotification(updated);
+  };
   const archiveTask=(id,val)=>{setTasks(ts=>{const u=ts.map(t=>t.id===id?{...t,archived:val}:t);pushToSheet(u,projects,nextId,view);return u;});};
 
   const addProject=({name,colorIdx})=>{setProjects(ps=>{const u=[...ps,{id:uid(),name,colorIdx,archived:false}];pushToSheet(tasks,u,nextId,view);return u;});};
@@ -863,7 +1308,7 @@ function App(){
   const archiveProject=(id,val)=>{setProjects(ps=>{const u=ps.map(p=>p.id===id?{...p,archived:val}:p);pushToSheet(tasks,u,nextId,view);return u;});};
   const reorderProjects=newOrder=>{setProjects(newOrder);pushToSheet(tasks,newOrder,nextId,view);};
 
-  const NAV=[{id:"today",label:"Today",icon:"◈"},{id:"projects",label:"Projects",icon:"⬡"},{id:"calendar",label:"Calendar",icon:"▦"}];
+  const NAV=[{id:"today",label:"Today",icon:"◈"},{id:"projects",label:"Projects",icon:"⬡"},{id:"kanban",label:"Kanban",icon:"▤"},{id:"calendar",label:"Calendar",icon:"▦"},{id:"dashboard",label:"Dashboard",icon:"▣"},{id:"search",label:"Search",icon:"⌕"}];
   const setViewAndClose=v=>{setView(v);setSidebarOpen(false);};
   const openTasks=tasks.filter(t=>!t.done&&!t.archived).length;
   const doneTasks=tasks.filter(t=>t.done&&!t.archived).length;
@@ -871,7 +1316,7 @@ function App(){
   const SidebarContent=()=>(
     <>
       <div style={{padding:"4px 8px 20px",borderBottom:`1px solid ${C.border}`,marginBottom:16}}>
-        <div style={{fontSize:16,fontWeight:800,color:C.text,letterSpacing:-0.3}}>◈ WorkDay</div>
+        <div style={{fontSize:16,fontWeight:800,color:C.text,letterSpacing:-0.3}}>◈ KCKS</div>
         <div style={{fontSize:11,color:C.textMuted,marginTop:3}}>{today.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
       </div>
       {NAV.map(n=>(
@@ -947,7 +1392,7 @@ function App(){
 
       <div className="mob-hdr" style={{position:"fixed",top:0,left:0,right:0,zIndex:50,background:C.surface,borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:12,padding:"12px 16px",paddingTop:"max(12px,env(safe-area-inset-top))"}}>
         <button onClick={()=>setSidebarOpen(true)} style={{background:"none",border:"none",color:C.text,fontSize:20,cursor:"pointer",lineHeight:1,padding:4}}>☰</button>
-        <span style={{fontSize:15,fontWeight:800,color:C.text}}>◈ WorkDay</span>
+        <span style={{fontSize:15,fontWeight:800,color:C.text}}>◈ KCKS</span>
         <span style={{marginLeft:"auto",fontSize:11,color:syncStatus==="saved"?C.done:syncStatus==="syncing"?C.accent:syncStatus==="error"?C.danger:C.textDim}}>
           {syncStatus==="syncing"?"⟳ Syncing…":syncStatus==="saved"?"✓ Saved":syncStatus==="error"?"⚠ Offline":today.toLocaleDateString("en-US",{month:"short",day:"numeric"})}
         </span>
@@ -956,15 +1401,18 @@ function App(){
       <div className="main" style={{flex:1,overflowY:"auto",padding:"80px 14px 90px",WebkitOverflowScrolling:"touch"}}>
         {view==="today"&&<TodayView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onArchiveTask={archiveTask} onAdd={add}/>}
         {view==="projects"&&<ProjectsView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onArchiveTask={archiveTask} onAdd={add} onAddProject={addProject} onEditProject={editProject} onDeleteProject={deleteProject} onArchiveProject={archiveProject} onReorderProjects={reorderProjects}/>}
+        {view==="kanban"&&<KanbanView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onSaveTask={saveTask} onAdd={add}/>}
         {view==="calendar"&&<CalendarView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onAdd={add}/>}
+        {view==="dashboard"&&<DashboardView tasks={tasks} projects={projects}/>}
+        {view==="search"&&<SearchView tasks={tasks} projects={projects} onToggle={toggle} onEdit={setOpenTask} onDelete={del} onArchiveTask={archiveTask}/>}
       </div>
 
       <div className="mob-nav" style={{position:"fixed",bottom:0,left:0,right:0,background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",paddingBottom:"max(12px,env(safe-area-inset-bottom))"}}>
         {NAV.map(n=>(
           <button key={n.id} onClick={()=>setView(n.id)}
-            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:view===n.id?C.accent:C.textDim}}>
-            <span style={{fontSize:18}}>{n.icon}</span>
-            <span style={{fontSize:10,fontWeight:view===n.id?700:400}}>{n.label}</span>
+            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"8px 0",background:"none",border:"none",cursor:"pointer",color:view===n.id?C.accent:C.textDim}}>
+            <span style={{fontSize:16}}>{n.icon}</span>
+            <span style={{fontSize:8,fontWeight:view===n.id?700:400}}>{n.label}</span>
           </button>
         ))}
       </div>
