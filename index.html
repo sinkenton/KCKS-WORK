@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="WorkDay"/>
 <meta name="theme-color" content="#0F1117"/>
+<link rel="manifest" href="/KCKS-WORK/manifest.json"/>
+<link rel="apple-touch-icon" href="/KCKS-WORK/icon-192.png"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <title>WorkDay</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -789,7 +792,12 @@ async function gLoad(){
 
 async function gSave(data){
   try{
-    await fetch(SCRIPT_URL,{method:"POST",body:JSON.stringify({action:"save",data})});
+    // Use GET with encoded data to avoid CORS preflight issues
+    const encoded = encodeURIComponent(JSON.stringify(data));
+    const url = SCRIPT_URL + "?action=save&data=" + encoded;
+    const r = await fetch(url);
+    const j = await r.json();
+    if(!j.ok) console.warn("Sheet save returned error",j);
   }catch(e){console.warn("Sheet save failed",e);}
 }
 
@@ -965,6 +973,15 @@ function App(){
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+<script>
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("/KCKS-WORK/sw.js")
+      .then(r=>console.log("SW registered"))
+      .catch(e=>console.log("SW error",e));
+  });
+}
 </script>
 </body>
 </html>
